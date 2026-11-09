@@ -56,6 +56,7 @@ export async function appendEvent(
   payload: Record<string, unknown>
 ): Promise<Event> {
   const at = new Date().toISOString();
+  const cleanPayload = JSON.parse(JSON.stringify(payload));
 
   return await withDbRetry(() => prisma.$transaction(async (tx) => {
     // Find the latest event for this run
@@ -66,7 +67,7 @@ export async function appendEvent(
 
     const seq = lastEvent ? lastEvent.seq + 1 : 0;
     const prevHash = lastEvent ? lastEvent.hash : GENESIS_PREV_HASH;
-    const hash = computeEventHash(prevHash, seq, type, at, payload);
+    const hash = computeEventHash(prevHash, seq, type, at, cleanPayload);
 
     const created = await tx.event.create({
       data: {
@@ -74,7 +75,7 @@ export async function appendEvent(
         seq,
         type,
         at: new Date(at),
-        payload: payload as any,
+        payload: cleanPayload,
         prevHash,
         hash,
       },
