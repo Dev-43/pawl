@@ -118,7 +118,7 @@ flowchart LR
 - **Starting Frame**: Summary slide showing GitHub repo link and MIT license badge.
 - **Narration**:
   > "Our honest limit: Pawl contains damage and freezes tool access post-execution, but cannot reverse settled bank transactions once completed on PayPal's payment network.
-  > Pawl is open source and ready for production today. Check out the code at github.com/Dev-43/Paypal. Thank you!"
+  > Pawl is open source and ready for production today. Check out the code at github.com/Dev-43/pawl. Thank you!"
 
 ---
 

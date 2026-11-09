@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "../../../lib/db";
+import { prisma, withDbRetry } from "../../../lib/db";
 import {
   verifyApproverToken,
   APPROVER_COOKIE_NAME,
@@ -18,9 +18,11 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    const config = await (prisma as any).moneyRuleConfig?.findUnique({
-      where: { id: "default" },
-    });
+    const config: any = await withDbRetry(() =>
+      (prisma as any).moneyRuleConfig?.findUnique({
+        where: { id: "default" },
+      })
+    );
 
     if (!config) {
       return NextResponse.json(DEFAULT_MONEY_RULE_CONFIG, { status: 200 });
@@ -65,26 +67,28 @@ export async function PUT(req: NextRequest) {
   try {
     const body = (await req.json()) as Partial<MoneyRuleConfig>;
 
-    const updated = await (prisma as any).moneyRuleConfig.upsert({
-      where: { id: "default" },
-      create: {
-        id: "default",
-        perCallCapUsd: body.perCallCapUsd ?? DEFAULT_MONEY_RULE_CONFIG.perCallCapUsd,
-        dailyBudgetUsd: body.dailyBudgetUsd ?? DEFAULT_MONEY_RULE_CONFIG.dailyBudgetUsd,
-        allowedCurrencies: body.allowedCurrencies ?? DEFAULT_MONEY_RULE_CONFIG.allowedCurrencies,
-        allowedMerchantContacts: body.allowedMerchantContacts ?? DEFAULT_MONEY_RULE_CONFIG.allowedMerchantContacts,
-        maxSteps: body.maxSteps ?? DEFAULT_MONEY_RULE_CONFIG.maxSteps,
-        updatedBy: "approver",
-      },
-      update: {
-        ...(body.perCallCapUsd !== undefined && { perCallCapUsd: body.perCallCapUsd }),
-        ...(body.dailyBudgetUsd !== undefined && { dailyBudgetUsd: body.dailyBudgetUsd }),
-        ...(body.allowedCurrencies !== undefined && { allowedCurrencies: body.allowedCurrencies }),
-        ...(body.allowedMerchantContacts !== undefined && { allowedMerchantContacts: body.allowedMerchantContacts }),
-        ...(body.maxSteps !== undefined && { maxSteps: body.maxSteps }),
-        updatedBy: "approver",
-      },
-    });
+    const updated = await withDbRetry(() =>
+      (prisma as any).moneyRuleConfig.upsert({
+        where: { id: "default" },
+        create: {
+          id: "default",
+          perCallCapUsd: body.perCallCapUsd ?? DEFAULT_MONEY_RULE_CONFIG.perCallCapUsd,
+          dailyBudgetUsd: body.dailyBudgetUsd ?? DEFAULT_MONEY_RULE_CONFIG.dailyBudgetUsd,
+          allowedCurrencies: body.allowedCurrencies ?? DEFAULT_MONEY_RULE_CONFIG.allowedCurrencies,
+          allowedMerchantContacts: body.allowedMerchantContacts ?? DEFAULT_MONEY_RULE_CONFIG.allowedMerchantContacts,
+          maxSteps: body.maxSteps ?? DEFAULT_MONEY_RULE_CONFIG.maxSteps,
+          updatedBy: "approver",
+        },
+        update: {
+          ...(body.perCallCapUsd !== undefined && { perCallCapUsd: body.perCallCapUsd }),
+          ...(body.dailyBudgetUsd !== undefined && { dailyBudgetUsd: body.dailyBudgetUsd }),
+          ...(body.allowedCurrencies !== undefined && { allowedCurrencies: body.allowedCurrencies }),
+          ...(body.allowedMerchantContacts !== undefined && { allowedMerchantContacts: body.allowedMerchantContacts }),
+          ...(body.maxSteps !== undefined && { maxSteps: body.maxSteps }),
+          updatedBy: "approver",
+        },
+      })
+    );
 
     // Write audit event
     try {

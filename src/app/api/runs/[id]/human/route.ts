@@ -11,7 +11,13 @@ import {
 } from "../../../../../contracts";
 import { applyHumanAction } from "../../../../../lib/policy/ratchet";
 import { executeTool } from "../../../../../lib/env/tools";
+import { executeTool as executePaypalTool } from "../../../../../lib/paypal/executor";
+import { getRegistryEntry } from "../../../../../lib/paypal/registry";
+import { performLedgerCheck } from "../../../../../lib/ledger/check";
 import { appendEvent } from "../../../../../lib/audit/chain";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function POST(
   req: NextRequest,
@@ -79,7 +85,20 @@ export async function POST(
       const held = run.heldAction as unknown as AgentAction;
 
       // Execute held action exactly once
-      const toolResult = await executeTool(held.tool, held.args, id);
+      let toolResult: any;
+      if (getRegistryEntry(held.tool)) {
+        const exec = await executePaypalTool(held);
+        toolResult = exec.result;
+        await performLedgerCheck({
+          callId: `human-appr-${Date.now()}`,
+          envelope: held,
+          executionStatus: exec.status,
+          executionResult: exec.result,
+          currentPermissionState: state,
+        });
+      } else {
+        toolResult = await executeTool(held.tool, held.args, id);
+      }
       nextHeldAction = null;
       nextStatus = "running";
 

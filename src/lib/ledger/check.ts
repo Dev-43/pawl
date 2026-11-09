@@ -117,7 +117,7 @@ export async function performLedgerCheck(
   }
 
   // 3. Fault injection check (for S4 demo)
-  if (process.env.FAULT_INJECTION === "ledger_mismatch") {
+  if (process.env.FAULT_INJECTION === "ledger_mismatch" || (envelope as any)?.faultInjection) {
     let nextState = applyRestriction(currentPermissionState, { kind: "freeze_run" }, "hard_limit");
     nextState = applyRestriction(nextState, { kind: "disable_tool", tool: envelope.tool as any }, "hard_limit");
 
@@ -141,7 +141,21 @@ export async function performLedgerCheck(
 
   // 4. Perform Read-Back Tool Call
   const readBackTool = registryEntry.readBackTool;
-  if (!readBackTool || !readBackExecutor) {
+  const effectiveExecutor =
+    readBackExecutor ||
+    (async (tool: string, args: any) => {
+      const { executeTool } = await import("../paypal/executor");
+      const r = await executeTool({
+        runId: envelope.runId,
+        stepIndex: envelope.stepIndex,
+        tool,
+        args,
+        rationale: "Ledger check read-back",
+      });
+      return r.result;
+    });
+
+  if (!readBackTool || !effectiveExecutor) {
     // Cannot verify without reader -> UNVERIFIABLE
     const nextState = applyRestriction(
       currentPermissionState,
@@ -176,7 +190,7 @@ export async function performLedgerCheck(
       lookupArgs = { invoice_id: invoiceId };
     }
 
-    observedRecord = await readBackExecutor(readBackTool, lookupArgs);
+    observedRecord = await effectiveExecutor(readBackTool, lookupArgs);
   } catch (err: any) {
     // Read-back failure fails closed to UNVERIFIABLE
     const nextState = applyRestriction(

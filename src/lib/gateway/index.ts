@@ -8,7 +8,7 @@ import {
   WatcherInput,
   RecentEventSummary,
 } from "../../contracts";
-import { prisma } from "../db";
+import { prisma, withDbRetry } from "../db";
 import { checkHardLimits } from "../policy/hardLimits";
 import {
   applyRestriction,
@@ -24,6 +24,7 @@ import { executeTool as executePaypalTool } from "../paypal/executor";
 import { performLedgerCheck } from "../ledger/check";
 import { extractUntrustedText } from "./provenance";
 import { briefIncident } from "../interpreter";
+import { getValidAccessToken } from "../paypal/token";
 
 // Test hook strictly for unit tests to bypass external network calls
 let testWatcherOverride: ((input: WatcherInput) => Promise<any>) | null = null;
@@ -103,16 +104,80 @@ export async function gatewayCall(input: GatewayCallInput): Promise<GatewayCallR
       };
     }
 
+    // BASELINE MODE: In baseline mode, the agent executes unguarded directly against PayPal sandbox
+    if (mode === "baseline") {
+      const exec = await executePaypalTool(action);
+      const execEv = await appendEvent(runId, "action_executed", {
+        tool: action.tool,
+        status: exec.status,
+        result: exec.result,
+        error: exec.error,
+        stepIndex: action.stepIndex,
+      });
+      eventIds.push(execEv.id);
+
+      return {
+        outcome: exec.status === "SUCCESS" ? "executed" : "blocked",
+        verdict: null,
+        toolResult: exec.result,
+        message: exec.error || "Executed successfully (baseline mode).",
+        permissionVersion: state.version,
+        eventIds,
+        timings: { hardLimitMs: 0, watcherMs: 0, totalMs: Date.now() - startTime },
+      };
+    }
+
+    // Look up declared scope IDs from run, permission state, or run_started event
+    let declaredScopeIds: string[] = (run as any).scopeIds || [];
+    if (declaredScopeIds.length === 0) {
+      if ((state as any)?.scopeIds && Array.isArray((state as any).scopeIds)) {
+        declaredScopeIds = (state as any).scopeIds;
+      } else {
+        const startEv = await withDbRetry(() =>
+          prisma.event.findFirst({
+            where: { runId, type: "run_started" },
+            select: { payload: true },
+          })
+        );
+        if (startEv?.payload && Array.isArray((startEv.payload as any).scopeIds)) {
+          declaredScopeIds = (startEv.payload as any).scopeIds;
+        }
+      }
+    }
+
     // Evaluate Deterministic Money Rules P1–P8
     const hlStart = Date.now();
+    const captureLookup = async (captureId: string) => {
+      try {
+        const token = await getValidAccessToken();
+        const res = await fetch(`https://api-m.sandbox.paypal.com/v2/payments/captures/${captureId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const gross = data.seller_receivable_breakdown?.gross_amount?.value || data.amount?.value || "0.00";
+        const currency = data.seller_receivable_breakdown?.gross_amount?.currency_code || data.amount?.currency_code || "USD";
+        return {
+          remainingRefundableAmount: gross,
+          currency,
+        };
+      } catch {
+        return null;
+      }
+    };
+
     const ruleVerdict = await evaluateMoneyRules({
       runId,
       stepIndex: action.stepIndex,
       tool: action.tool,
       args: action.args,
-      declaredScopeIds: (run as any).scopeIds || [],
+      declaredScopeIds,
       allowedTools: state.grants.map((g) => g.tool),
       accumulatedSpendMinor: 0,
+      captureLookup,
     });
     hardLimitMs = Date.now() - hlStart;
 
@@ -140,12 +205,38 @@ export async function gatewayCall(input: GatewayCallInput): Promise<GatewayCallR
     }
 
     if (ruleVerdict.decision === "blocked") {
+      // Ratchet: Move tool to require_approval on policy block
+      state = applyRestriction(state, { kind: "require_approval", tool: action.tool }, "hard_limit");
+      await withDbRetry(() =>
+        prisma.run.update({
+          where: { id: runId },
+          data: { permissionState: state as any },
+        })
+      );
+
       const blockedEv = await appendEvent(runId, "action_blocked", {
         ruleId: ruleVerdict.ruleId,
         reason: ruleVerdict.reason,
         stepIndex: action.stepIndex,
+        tool: action.tool,
+        target: (action.args as any)?.capture_id || (action.args as any)?.id,
+        args: action.args,
       });
       eventIds.push(blockedEv.id);
+
+      const restrictedEv = await appendEvent(runId, "restriction_applied", {
+        kind: "require_approval",
+        tool: action.tool,
+        version: state.version,
+      });
+      eventIds.push(restrictedEv.id);
+
+      // Trigger incident briefing
+      try {
+        await briefIncident(runId);
+      } catch {
+        // Best effort
+      }
 
       return {
         outcome: "blocked",
@@ -200,26 +291,7 @@ export async function gatewayCall(input: GatewayCallInput): Promise<GatewayCallR
       };
     }
 
-    // BASELINE MODE: Executes directly once deterministic checks pass
-    if (mode === "baseline") {
-      const exec = await executePaypalTool(action);
-      const execEv = await appendEvent(runId, "action_executed", {
-        tool: action.tool,
-        status: exec.status,
-        result: exec.result,
-      });
-      eventIds.push(execEv.id);
 
-      return {
-        outcome: exec.status === "SUCCESS" ? "executed" : "blocked",
-        verdict: null,
-        toolResult: exec.result,
-        message: exec.error || "Executed successfully (baseline mode).",
-        permissionVersion: state.version,
-        eventIds,
-        timings: { hardLimitMs, watcherMs: 0, totalMs: Date.now() - startTime },
-      };
-    }
 
     // PROTECTED MODE: Evaluate Intent Watcher
     const pastEvents = await prisma.event.findMany({
@@ -361,7 +433,10 @@ export async function gatewayCall(input: GatewayCallInput): Promise<GatewayCallR
     if (registryEntry.class === "money_move") {
       ledgerCheckResult = await performLedgerCheck({
         callId: proposedEvent.id,
-        envelope: action,
+        envelope: {
+          ...action,
+          faultInjection: (run as any)?.scenarioId === "S4" || process.env.FAULT_INJECTION === "ledger_mismatch",
+        } as any,
         executionStatus: exec.status,
         executionResult: exec.result,
         currentPermissionState: state,
@@ -393,11 +468,21 @@ export async function gatewayCall(input: GatewayCallInput): Promise<GatewayCallR
     });
     eventIds.push(execEv.id);
 
+    const finalOutcome: Outcome =
+      ledgerCheckResult?.check.status === "MISMATCH"
+        ? "frozen"
+        : exec.status === "SUCCESS"
+        ? "executed"
+        : "blocked";
+
     return {
-      outcome: exec.status === "SUCCESS" ? "executed" : "blocked",
+      outcome: finalOutcome,
       verdict,
       toolResult: exec.result,
-      message: exec.error || "Executed successfully under protected oversight.",
+      message:
+        ledgerCheckResult?.check.status === "MISMATCH"
+          ? `Ledger verification MISMATCH detected (${ledgerCheckResult.check.detail}). Run frozen.`
+          : exec.error || "Executed successfully under protected oversight.",
       permissionVersion: state.version,
       eventIds,
       timings: { hardLimitMs, watcherMs, totalMs: Date.now() - startTime },

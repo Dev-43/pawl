@@ -104,8 +104,8 @@ flowchart TD
 
 ### 2. Installation
 ```bash
-git clone https://github.com/Dev-43/Paypal.git
-cd Paypal
+git clone https://github.com/Dev-43/pawl.git
+cd pawl
 npm install
 npx prisma generate
 npx prisma db push

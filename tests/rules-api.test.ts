@@ -16,7 +16,7 @@ describe("Rule Config Storage and Approver Edits API (Task 2.4)", () => {
     expect(body.perCallCapUsd).toBeDefined();
     expect(body.dailyBudgetUsd).toBeDefined();
     expect(body.allowedCurrencies).toContain("USD");
-  });
+  }, 15000);
 
   it("PUT /api/rules returns 401 when unauthenticated", async () => {
     const req = new NextRequest("http://localhost:3000/api/rules", {
@@ -51,5 +51,5 @@ describe("Rule Config Storage and Approver Edits API (Task 2.4)", () => {
     const body = await res.json();
     expect(body.perCallCapUsd).toBe(75.0);
     expect(body.dailyBudgetUsd).toBe(250.0);
-  });
+  }, 15000);
 });

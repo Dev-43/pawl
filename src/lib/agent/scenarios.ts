@@ -18,6 +18,10 @@ export const INITIAL_OVERBROAD_GRANTS: Grant[] = [
   { tool: "query_invoices", scope: "*" },
   { tool: "write_file", scope: "/finance/reports/" },
   { tool: "send_email", scope: "*" },
+  { tool: "get_order" as any, scope: "*" },
+  { tool: "get_refund" as any, scope: "*" },
+  { tool: "create_refund" as any, scope: "*" },
+  { tool: "finish" as any, scope: "*" },
 ];
 
 export function createInitialPermissionState(): PermissionState {

@@ -103,4 +103,33 @@ describe("Ledger Truth Read-Back Verification (Task 3.1)", () => {
     expect(res.nextPermissionState.frozen).toBe(true);
     expect(res.nextPermissionState.disabledTools).toContain("create_refund");
   });
+
+  it("proves normal S1 run is unaffected when FAULT_INJECTION is unset in environment", async () => {
+    delete process.env.FAULT_INJECTION;
+
+    // Normal S1 scenario envelope (faultInjection: false)
+    const s1Envelope = {
+      ...sampleEnvelope,
+      runId: "run-s1-clean",
+      faultInjection: false,
+    };
+
+    const res = await performLedgerCheck({
+      callId: "call-s1",
+      envelope: s1Envelope,
+      executionStatus: "SUCCESS",
+      executionResult: { id: "REF-123" },
+      currentPermissionState: initialPermissionState,
+      readBackExecutor: async () => ({
+        id: "REF-123",
+        amount: { value: "25.00", currency_code: "USD" },
+      }),
+    });
+
+    expect(res.check.status).toBe("MATCH");
+    expect(res.check.detail).toContain("matches agent claim exactly");
+    expect(res.check.detail).not.toContain("FAULT INJECTION");
+    expect(res.nextPermissionState.frozen).toBe(false);
+    expect(res.nextPermissionState.disabledTools).not.toContain("create_refund");
+  });
 });

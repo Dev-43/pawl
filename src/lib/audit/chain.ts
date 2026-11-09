@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { EventType, Event } from "../../contracts";
-import { prisma } from "../db";
+import { prisma, withDbRetry } from "../db";
 
 export const GENESIS_PREV_HASH = "0".repeat(64);
 
@@ -57,7 +57,7 @@ export async function appendEvent(
 ): Promise<Event> {
   const at = new Date().toISOString();
 
-  return await prisma.$transaction(async (tx) => {
+  return await withDbRetry(() => prisma.$transaction(async (tx) => {
     // Find the latest event for this run
     const lastEvent = await tx.event.findFirst({
       where: { runId },
@@ -90,7 +90,7 @@ export async function appendEvent(
       prevHash: created.prevHash,
       hash: created.hash,
     };
-  });
+  }));
 }
 
 /**

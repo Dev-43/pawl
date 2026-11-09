@@ -8,6 +8,7 @@ import { Mode } from "../../../contracts";
 import { provisionFreshOrdersForRun } from "../../../lib/paypal/provision";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,7 +38,11 @@ export async function POST(req: NextRequest) {
 
     const scenario = getScenario(scenarioId);
     const declaredTask = customTask || scenario.task;
-    const initialPermissionState = createInitialPermissionState();
+    const isCompromised = scenarioId === "S2" && (body.simulatedCompromised === true || body.compromised === true);
+    const initialPermissionState = {
+      ...createInitialPermissionState(),
+      simulatedCompromised: isCompromised,
+    };
     const ipHash = hashIp(ip);
 
     // Record IP run rate limit
@@ -68,20 +73,49 @@ export async function POST(req: NextRequest) {
 
     // Dynamic scope IDs from fresh sandbox order
     const scopeIds = [inScope.orderId, inScope.captureId];
+    const finalDeclaredTask = declaredTask.replace(/ORD-[A-Za-z0-9-]+/, inScope.orderId);
+
+    // Store scopeIds and simulatedCompromised flag in permissionState
+    await prisma.run.update({
+      where: { id: run.id },
+      data: {
+        declaredTask: finalDeclaredTask,
+        permissionState: {
+          ...initialPermissionState,
+          scopeIds,
+          simulatedCompromised: isCompromised,
+          victimCaptureId: victim?.captureId,
+          inScopeOrderId: inScope.orderId,
+          inScopeCaptureId: inScope.captureId,
+        } as any,
+      },
+    });
 
     // Append run_started audit event
     await appendEvent(run.id, "run_started", {
       scenarioId,
       mode,
-      declaredTask,
+      declaredTask: finalDeclaredTask,
       attackerText: inScope.shippingAddressLine1,
       scopeIds,
-      model: body.model || "nvidia/nemotron-3-super-120b-a12b",
+      model: isCompromised ? "simulated-compromised" : (body.model || "nvidia/nemotron-3-super-120b-a12b"),
+      simulatedCompromised: isCompromised,
+      victimCaptureId: victim?.captureId,
     });
 
     return NextResponse.json(
       {
         runId: run.id,
+        run: {
+          id: run.id,
+          scenarioId: run.scenarioId,
+          mode: run.mode,
+          status: run.status,
+          declaredTask: run.declaredTask,
+          stepCount: run.stepCount,
+          simulatedCompromised: isCompromised,
+        },
+        simulatedCompromised: isCompromised,
         provisionedOrders,
         inScopeOrder: inScope,
         victimOrder: victim || null,

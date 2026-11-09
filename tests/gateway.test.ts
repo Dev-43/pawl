@@ -5,6 +5,7 @@ import { WatcherUnavailableError, AgentAction } from "../src/contracts";
 
 vi.mock("../src/lib/db", () => {
   return {
+    withDbRetry: vi.fn(async (cb) => cb()),
     prisma: {
       run: {
         findUnique: vi.fn(),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "../../../lib/db";
-import { getTokenHealth, assertSandboxEnv } from "../../../lib/paypal/token";
+import { prisma, withDbRetry } from "../../../lib/db";
+import { getTokenHealth, assertSandboxEnv, getValidAccessToken } from "../../../lib/paypal/token";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +21,27 @@ export async function GET() {
   let dbStatus = { ok: false, latencyMs: 0, error: undefined as string | undefined };
   try {
     const t0 = Date.now();
-    await prisma.$queryRaw`SELECT 1`;
+    await withDbRetry(() => prisma.$queryRaw`SELECT 1`);
     dbStatus = { ok: true, latencyMs: Date.now() - t0, error: undefined };
   } catch (err: any) {
     dbStatus = { ok: false, latencyMs: 0, error: err.message };
   }
 
   // 2. PayPal Token Health
-  const paypalTokenStatus = getTokenHealth();
+  let paypalTokenStatus = getTokenHealth();
+  if (!paypalTokenStatus.valid) {
+    try {
+      await getValidAccessToken();
+      paypalTokenStatus = getTokenHealth();
+    } catch (err: any) {
+      paypalTokenStatus = {
+        valid: false,
+        remainingSeconds: 0,
+        expiresAt: null,
+        error: err.message,
+      };
+    }
+  }
 
   // 3. Nebius Health
   const nebiusConfigured = Boolean(process.env.NEBIUS_API_KEY && process.env.NEBIUS_API_KEY.length > 10);
