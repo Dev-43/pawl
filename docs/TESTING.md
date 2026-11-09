@@ -4,7 +4,7 @@ This document details the test suites, benchmark evaluations, and runtime checks
 
 ---
 
-## 1. Automated Vitest Suite (103 / 103 Passing)
+## 1. Automated Vitest Suite (107 / 107 Passing)
 
 The unit and integration test suite covers all defense layers L0–L5, deterministic money rules P1–P8, cryptographic audit hashing, fresh sandbox provisioning, and PayPal executor retries:
 
@@ -15,11 +15,12 @@ The unit and integration test suite covers all defense layers L0–L5, determini
 | `tests/executor.test.ts` | 4 / 4 | Gateway-to-toolkit execution, timeout enforcement (10s), rate-limit 429 backoff, unhandled tool error propagation |
 | `tests/money-rules.test.ts` | 25 / 25 | Rules P1–P8: currency validation, refund caps, rate limits, allow-list gating, cumulative spend caps, precedence invariants |
 | `tests/rules-api.test.ts` | 3 / 3 | Database persistence of `MoneyRuleConfig` in Neon PostgreSQL, public GET access, authenticated approver PUT access |
-| `tests/ledger-check.test.ts` | 4 / 4 | Layer 4 post-execution PayPal ledger read-back, discrepancy detection, containment ratcheting, automatic freeze on MISMATCH |
+| `tests/ledger-check.test.ts` | 5 / 5 | Layer 4 post-execution PayPal ledger read-back, discrepancy detection, containment ratcheting, automatic freeze on MISMATCH, S1 clean unaffected |
 | `tests/report-check.test.ts` | 2 / 2 | Summary report reconciliation and provenance verification against PayPal ledger truth |
 | `tests/provenance.test.ts` | 4 / 4 | Untrusted text extraction across nested order lines, shipping notes, dispute messages, and provenance tracking into Watcher |
 | `tests/gateway.test.ts` | 5 / 5 | Full Gateway pipeline execution, fail-closed behavior, precedence invariants (L1 deterministic money rules overrule Watcher) |
 | `tests/provision.test.ts` | 4 / 4 | Per-run sandbox provisioning: halt on provision failure, hourly cap enforcement, runId-customId binding, S2 dual-order creation |
+| `tests/compromised-mode.test.ts` | 3 / 3 | S2 simulated compromised mode: banner flag verification, baseline execution, protected blocking by Rule P7 and ratchet |
 | `tests/audit.test.ts` | 4 / 4 | Layer 5 cryptographic audit chain, Genesis hash verification, sequence continuity, SHA-256 tamper resistance |
 | `tests/ratchet.test.ts` | 8 / 8 | One-way ratchet invariant: monotonicity of permissions, restriction log, impossible privilege widening |
 | `tests/hardLimits.test.ts` | 10 / 10 | Deterministic hard limit boundary cases and immediate rejection semantics |
@@ -27,7 +28,7 @@ The unit and integration test suite covers all defense layers L0–L5, determini
 | `tests/approver.test.ts` | 3 / 3 | Passcode verification, JWT cookie issuance, approver authentication checks |
 | `tests/json.test.ts` | 8 / 8 | Resilient JSON repair and sanitization for LLM tool inputs |
 
-**Summary**: 16 test files, 103 tests passed, 0 failures.
+**Summary**: 17 test files, 107 tests passed, 0 failures.
 
 ---
 
