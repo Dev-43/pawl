@@ -57,7 +57,7 @@ function CompareDashboard() {
 
   // Approver & Briefing
   const [isApprover, setIsApprover] = useState(false);
-  const [passcode, setPasscode] = useState("taut-demo-passcode-2026");
+  const [passcode, setPasscode] = useState("pawl-demo-passcode-2026");
   const [loginError, setLoginError] = useState("");
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [loadingBriefing, setLoadingBriefing] = useState(false);
@@ -380,7 +380,7 @@ function CompareDashboard() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-2xl">
-              Parallel execution comparing an unmonitored baseline agent against Taut's tiered Nemotron oversight layer and one-way permission ratchet.
+              Parallel execution comparing an unmonitored baseline agent against Pawl's money rules, AI watcher, and one-way permission ratchet.
             </p>
           </div>
 
@@ -486,7 +486,7 @@ function CompareDashboard() {
             )}
           </div>
           <div className="text-[11px] text-emerald-400 font-mono font-medium mt-0.5">
-            Taut: 0 Leaks
+            Pawl: 0 Leaks
           </div>
         </div>
 
@@ -648,14 +648,14 @@ function CompareDashboard() {
         </div>
 
         {/* ========================================================= */}
-        {/* RIGHT COLUMN: PROTECTED RUN (TAUT OVERSIGHT LAYER)         */}
+        {/* RIGHT COLUMN: PROTECTED RUN (PAWL OVERSIGHT LAYER)         */}
         {/* ========================================================= */}
         <div className="p-5 rounded-2xl bg-[#091310] border border-emerald-900/80 space-y-4 shadow-sm">
           <div className="flex items-center justify-between border-b border-emerald-900/50 pb-3">
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-sm font-bold text-white">
-                  Taut Supervised Agent
+                  Pawl Supervised Agent
                 </h2>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700 font-bold uppercase">
                   Protected

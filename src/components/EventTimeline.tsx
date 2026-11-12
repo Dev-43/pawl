@@ -161,7 +161,7 @@ function EventCard({
 
         {event.type === "hard_limit_checked" && (
           <div className="font-mono text-[11px]">
-            <span className="text-rose-300 font-semibold">Rule: {String(payload.rule || "H1-H2")}</span>
+            <span className="text-rose-300 font-semibold">Rule: {String(payload.rule || "P1-P8")}</span>
             <span className="ml-2 text-zinc-400">{String(payload.message || "")}</span>
           </div>
         )}

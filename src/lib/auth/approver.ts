@@ -10,7 +10,7 @@ function getSessionSecret(): string {
  * Constant-time comparison of approver passcode to prevent timing attacks.
  */
 export function verifyApproverPasscode(candidate: string): boolean {
-  const expected = process.env.APPROVER_PASSCODE || "taut-demo-passcode-2026";
+  const expected = process.env.APPROVER_PASSCODE || "pawl-demo-passcode-2026";
   if (!candidate || typeof candidate !== "string") return false;
 
   const candidateBuf = Buffer.from(candidate);

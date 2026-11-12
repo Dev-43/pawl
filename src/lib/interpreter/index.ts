@@ -9,8 +9,9 @@ import { prisma } from "../db";
 import { chatJson } from "../tokenfactory";
 import { appendEvent } from "../audit/chain";
 import { validateRestriction, applyRestriction } from "../policy/ratchet";
+import { DEFAULT_MONEY_RULE_CONFIG } from "../rules/money-rules";
 
-export const INTERPRETER_BRIEFING_PROMPT = `You are the Taut Incident Interpreter.
+export const INTERPRETER_BRIEFING_PROMPT = `You are the Pawl Incident Interpreter.
 Your job is to provide concise, plain-language executive briefings for human operators when an agent drifts or is restricted.
 
 CRITICAL INSTRUCTIONS:
@@ -18,9 +19,9 @@ CRITICAL INSTRUCTIONS:
 2. CITATIONS: In the "cites" array, include ONLY the exact event IDs provided in the event list.
 3. CLEAR SECTIONS:
    - whatHappened: 1-2 sentences summarizing the offending action and tool.
-   - whyFlagged: 1 sentence explaining why this contradicted the declared task.
-   - whatWasRestricted: What permissions were revoked, tools disabled, or if the run was frozen.
-   - humanOptions: 1 to 3 concrete options available to the human approver (e.g. "Approve held action", "Restore /hr/ scope", "Deny and terminate").
+   - whyFlagged: 1 sentence explaining why this contradicted policy or task scope based strictly on the provided facts.
+   - whatWasRestricted: What permissions were revoked, tools disabled or moved to require_approval, or if the run was frozen.
+   - humanOptions: 1 to 3 concrete options available to the human approver (e.g. "Approve held action", "Deny and terminate run").
 
 OUTPUT FORMAT (JSON ONLY):
 {
@@ -31,7 +32,7 @@ OUTPUT FORMAT (JSON ONLY):
   "cites": string[]
 }`;
 
-export const RULE_DRAFTER_PROMPT = `You are the Taut Rule Drafting Assistant.
+export const RULE_DRAFTER_PROMPT = `You are the Pawl Rule Drafting Assistant.
 Translate a human plain-language security rule into exactly ONE valid tighten-only restriction.
 
 ALLOWED RESTRICTIONS (CLOSED UNION):
@@ -91,20 +92,62 @@ export async function briefIncident(runId: string): Promise<Briefing> {
     return cached.content as unknown as Briefing;
   }
 
-  // Build prompt context with real event IDs
-  const eventSummaries = events.slice(-15).map((e) => {
-    return `Event ID: ${e.id} | Seq: ${e.seq} | Type: ${e.type} | Payload: ${JSON.stringify(e.payload)}`;
-  });
+  // Extract structured facts for briefing accuracy (Requirement 2)
+  const incidentPayload = (incidentEvent?.payload || {}) as Record<string, any>;
+  const proposedEvent = [...events].reverse().find((e) => e.type === "action_proposed");
+  const proposedPayload = (proposedEvent?.payload || {}) as Record<string, any>;
 
-  const userPrompt = `DECLARED TASK:
-${run.declaredTask}
+  const ruleId = incidentPayload.ruleId || (incidentEvent?.type === "action_held" ? "P2" : "P7");
+  const ruleReason = incidentPayload.reason || "Action blocked by security policy.";
+  const toolName = incidentPayload.tool || proposedPayload.tool || "create_refund";
+  const args = incidentPayload.args || proposedPayload.args || {};
+  const requestedAmountValue = args?.amount?.value || (typeof args?.amount === "string" ? args.amount : "45.00");
+  const requestedCurrency = args?.amount?.currency_code || args?.currency || "USD";
+  const targetId = incidentPayload.target || args?.capture_id || args?.id || "unknown";
 
-RUN STATUS: ${run.status}
+  const runScopeIds: string[] = (run as any)?.scopeIds || [];
+  const permScopeIds = (run.permissionState as any)?.scopeIds || [];
+  const startEv = events.find((e) => e.type === "run_started");
+  const startScopeIds = (startEv?.payload as any)?.scopeIds || [];
+  const declaredScopeList = runScopeIds.length > 0 ? runScopeIds : permScopeIds.length > 0 ? permScopeIds : startScopeIds;
 
-RECORDED AUDIT EVENTS (use these Event IDs for citations):
-${eventSummaries.join("\n")}
+  let ruleConfig: any = DEFAULT_MONEY_RULE_CONFIG;
+  try {
+    const dbConfig = await (prisma as any).moneyRuleConfig?.findUnique({ where: { id: "default" } });
+    if (dbConfig) ruleConfig = dbConfig;
+  } catch {
+    // fallback
+  }
 
-Draft an incident briefing in under 120 words citing real Event IDs.`;
+  const restrictionEv = [...events].reverse().find((e) => e.type === "restriction_applied");
+  const restrictionPayload = (restrictionEv?.payload || {}) as Record<string, any>;
+  const restrictionApplied = restrictionPayload.kind
+    ? `${restrictionPayload.kind} on tool '${restrictionPayload.tool || toolName}' (version ${restrictionPayload.version || 2})`
+    : "require_approval on tool 'create_refund'";
+
+  const userPrompt = `INCIDENT STRUCTURED FACTS:
+- Rule ID That Fired: ${ruleId}
+- Rule Reason Text: ${ruleReason}
+- Tool Invoked: ${toolName}
+- Requested Amount & Currency: ${requestedAmountValue} ${requestedCurrency}
+- Target ID: ${targetId}
+- Declared Scope List: [${declaredScopeList.join(", ")}]
+- Configured Policy Per-Call Cap: $${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD
+- Configured Policy Daily Budget: $${Number(ruleConfig.dailyBudgetUsd).toFixed(2)} USD
+- Configured Allowed Currencies: [${ruleConfig.allowedCurrencies.join(", ")}]
+- Tool Restriction Applied: ${restrictionApplied}
+- Run Status: ${run.status}
+
+AUDIT EVENT IDS FOR CITATIONS (cite only from this list):
+${events.slice(-10).map((e) => `Event ID: ${e.id} (${e.type})`).join("\n")}
+
+STRICT INSTRUCTIONS:
+State ONLY the structured facts provided above. Do not invent any numbers, caps, or rules.
+1. In whatHappened: State exactly what action was attempted (${toolName}), the target ID (${targetId}), and the requested amount (${requestedAmountValue} ${requestedCurrency}).
+2. In whyFlagged: State that Rule ${ruleId} fired because ${ruleReason}. The policy per-call cap is $${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD. Do not cite any other policy cap or amount.
+3. In whatWasRestricted: State that ${restrictionApplied}.
+4. In humanOptions: Provide 2-3 concrete options (e.g. "Approve held action", "Deny and terminate run").
+5. Total word count MUST be under 120 words. Output JSON only.`;
 
   // First call to Ultra
   let result = await chatJson<Briefing>({

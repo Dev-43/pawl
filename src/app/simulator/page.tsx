@@ -64,7 +64,7 @@ export default function SimulatorPage() {
   const [showBanner, setShowBanner] = useState<boolean>(false);
   const [runLogs, setRunLogs] = useState<any[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<string | null>(null);
-  const [briefing, setBriefing] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState<any | null>(null);
   const [provisionedOrders, setProvisionedOrders] = useState<any[]>([]);
   const [provisionError, setProvisionError] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
@@ -101,7 +101,9 @@ export default function SimulatorPage() {
             setHeldAction(data.run.heldAction);
           }
           if (data.briefings && data.briefings.length > 0 && !briefing) {
-            setBriefing(data.briefings[0].markdown);
+            const b = data.briefings[0];
+            const content = (b && typeof b.content === "object" && b.content !== null) ? b.content : b;
+            setBriefing(content);
           }
         } catch {
           // silent polling retry
@@ -271,8 +273,10 @@ export default function SimulatorPage() {
             body: JSON.stringify({ runId }),
           });
           const briefData = await briefRes.json();
-          if (briefData.briefing?.text || briefData.briefing?.summary) {
-            setBriefing(briefData.briefing.text || briefData.briefing.summary);
+          if (briefData.briefing) {
+            const b = briefData.briefing;
+            const content = (b && typeof b.content === "object" && b.content !== null) ? b.content : b;
+            setBriefing(content);
           }
         } catch {
           // best-effort
@@ -678,10 +682,43 @@ export default function SimulatorPage() {
             {briefing && (
               <div className="rounded-xl border border-rose-900/60 bg-rose-950/20 p-5 space-y-3">
                 <div className="flex items-center space-x-2 text-rose-400">
-                  <span className="font-bold text-xs uppercase tracking-wider font-mono">Incident Executive Briefing</span>
+                  <span className="font-bold text-xs uppercase tracking-wider font-mono">Incident briefing (AI-written)</span>
                 </div>
-                <p className="text-xs text-zinc-300 leading-relaxed">{briefing}</p>
-                <div className="pt-2 flex items-center justify-between text-[11px] font-mono text-zinc-500">
+                {typeof briefing === "object" && briefing !== null ? (
+                  <div className="space-y-2 text-xs text-zinc-300">
+                    {briefing.whatHappened && (
+                      <div>
+                        <span className="font-semibold text-rose-300 font-mono">What Happened: </span>
+                        <span>{briefing.whatHappened}</span>
+                      </div>
+                    )}
+                    {briefing.whyFlagged && (
+                      <div>
+                        <span className="font-semibold text-rose-300 font-mono">Why Flagged: </span>
+                        <span>{briefing.whyFlagged}</span>
+                      </div>
+                    )}
+                    {briefing.whatWasRestricted && (
+                      <div>
+                        <span className="font-semibold text-rose-300 font-mono">What Was Restricted: </span>
+                        <span>{briefing.whatWasRestricted}</span>
+                      </div>
+                    )}
+                    {Array.isArray(briefing.humanOptions) && briefing.humanOptions.length > 0 && (
+                      <div>
+                        <span className="font-semibold text-rose-300 font-mono">Human Options: </span>
+                        <ul className="list-disc list-inside mt-1 space-y-0.5 text-zinc-400 pl-1">
+                          {briefing.humanOptions.map((opt: string, idx: number) => (
+                            <li key={idx}>{opt}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-300 leading-relaxed">{String(briefing)}</p>
+                )}
+                <div className="pt-2 flex items-center justify-between text-[11px] font-mono text-zinc-500 border-t border-rose-950/40">
                   <span>Author: NVIDIA Nemotron Ultra</span>
                   <span>Length: &lt; 120 words</span>
                 </div>
