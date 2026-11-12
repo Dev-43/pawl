@@ -682,7 +682,11 @@ export default function SimulatorPage() {
             {briefing && (
               <div className="rounded-xl border border-rose-900/60 bg-rose-950/20 p-5 space-y-3">
                 <div className="flex items-center space-x-2 text-rose-400">
-                  <span className="font-bold text-xs uppercase tracking-wider font-mono">Incident briefing (AI-written)</span>
+                  <span className="font-bold text-xs uppercase tracking-wider font-mono">
+                    {briefing?.author === "NVIDIA Nemotron Ultra"
+                      ? "Incident briefing (AI-written)"
+                      : "Incident briefing (template)"}
+                  </span>
                 </div>
                 {typeof briefing === "object" && briefing !== null ? (
                   <div className="space-y-2 text-xs text-zinc-300">
