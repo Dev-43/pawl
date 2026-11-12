@@ -16,7 +16,7 @@ export interface SpendAndRateCheckResult {
  */
 export async function checkSpendAndRate(ip: string): Promise<SpendAndRateCheckResult> {
   const spendCap = parseFloat(process.env.SPEND_GUARD_USD || process.env.SPEND_CAP_USD || "35");
-  const hourlyCap = parseInt(process.env.RUNS_PER_IP_PER_HOUR || "6", 10);
+  const hourlyCap = parseInt(process.env.RUNS_PER_IP_PER_HOUR || "60", 10);
 
   // 1. Check aggregate spend cap
   try {
