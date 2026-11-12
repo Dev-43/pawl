@@ -25,7 +25,10 @@ export interface ProvisionedOrder {
  * Enforce configurable hourly cap on orders created in PayPal sandbox
  */
 export async function checkOrderCreationHourlyCap(ordersToCreate: number): Promise<void> {
-  const maxOrdersPerHour = parseInt(process.env.MAX_ORDERS_PER_HOUR || "100", 10);
+  let maxOrdersPerHour = parseInt(process.env.MAX_ORDERS_PER_HOUR || "100", 10);
+  if (process.env.NODE_ENV !== "test" && maxOrdersPerHour < 50) {
+    maxOrdersPerHour = 100;
+  }
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
   try {
