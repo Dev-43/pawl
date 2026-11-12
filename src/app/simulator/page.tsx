@@ -719,7 +719,7 @@ export default function SimulatorPage() {
                   <p className="text-xs text-zinc-300 leading-relaxed">{String(briefing)}</p>
                 )}
                 <div className="pt-2 flex items-center justify-between text-[11px] font-mono text-zinc-500 border-t border-rose-950/40">
-                  <span>Author: NVIDIA Nemotron Ultra</span>
+                  <span>Author: {briefing.author || "NVIDIA Nemotron Ultra"}</span>
                 </div>
               </div>
             )}

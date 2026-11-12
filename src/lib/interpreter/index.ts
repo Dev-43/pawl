@@ -1,5 +1,4 @@
 import {
-  Briefing,
   BriefingSchema,
   Rule,
   PermissionState,
@@ -10,6 +9,64 @@ import { chatJson } from "../tokenfactory";
 import { appendEvent } from "../audit/chain";
 import { validateRestriction, applyRestriction } from "../policy/ratchet";
 import { DEFAULT_MONEY_RULE_CONFIG } from "../rules/money-rules";
+
+export interface Briefing {
+  runId?: string;
+  whatHappened: string;
+  whyFlagged: string;
+  whatWasRestricted: string;
+  humanOptions: string[];
+  cites: string[];
+  author?: string;
+  cached?: boolean;
+}
+
+export function validateBriefingDeterministically(
+  b: Briefing,
+  facts: {
+    tool: string;
+    target: string;
+    amount: string;
+    ruleId: string;
+    scopeList: string[];
+  }
+): boolean {
+  if (!b || typeof b !== "object") return false;
+  if (!b.whatHappened || !b.whyFlagged) return false;
+
+  const whatLower = b.whatHappened.toLowerCase();
+  // 1. whatHappened must contain the tool
+  if (!whatLower.includes(facts.tool.toLowerCase())) return false;
+
+  // 2. whatHappened must contain target ID
+  if (facts.target && !b.whatHappened.includes(facts.target)) return false;
+
+  // 3. whatHappened must contain amount
+  if (facts.amount && facts.amount !== "0.00" && facts.amount !== "0") {
+    const num = parseFloat(facts.amount);
+    const amountVariants = [
+      facts.amount,
+      num.toFixed(2),
+      num.toString(),
+      `$${facts.amount}`,
+      `$${num.toFixed(2)}`,
+    ];
+    if (!amountVariants.some((v) => b.whatHappened.includes(v))) {
+      return false;
+    }
+  }
+
+  // 4. For P7: the target must NOT be in the printed scope list
+  if (facts.ruleId === "P7") {
+    if (facts.scopeList.includes(facts.target)) return false;
+    const bracketMatch = b.whyFlagged.match(/\[(.*?)\]/);
+    if (bracketMatch && bracketMatch[1] && bracketMatch[1].includes(facts.target)) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export const INTERPRETER_BRIEFING_PROMPT = `You are the Pawl Incident Interpreter.
 Your job is to provide concise, plain-language executive briefings for human operators when an agent drifts or is restricted.
@@ -57,7 +114,7 @@ function countWords(briefing: Briefing): number {
  * Generates an executive briefing for an incident (freeze or hold).
  * Cached per incidentKey.
  */
-export async function briefIncident(runId: string): Promise<Briefing> {
+export async function briefIncident(runId: string): Promise<Briefing | null> {
   const run = await prisma.run.findUnique({
     where: { id: runId },
   });
@@ -72,16 +129,26 @@ export async function briefIncident(runId: string): Promise<Briefing> {
     orderBy: { seq: "asc" },
   });
 
-  const incidentEvent =
-    [...events].reverse().find(
-      (e) =>
-        e.type === "action_blocked" ||
-        e.type === "action_held" ||
-        e.type === "run_frozen"
-    ) ||
-    [...events].reverse().find((e) => e.type === "restriction_applied");
+  // Requirement 1: Build the briefing facts ONLY from the blocked or held event payload
+  const incidentEvent = [...events].reverse().find(
+    (e) =>
+      e.type === "action_blocked" ||
+      e.type === "action_held" ||
+      e.type === "run_frozen"
+  );
 
-  const incidentSeq = incidentEvent ? incidentEvent.seq : events.length;
+  // If no such event exists, skip the briefing
+  if (!incidentEvent) {
+    return null;
+  }
+
+  const incidentPayload = (incidentEvent.payload || {}) as Record<string, any>;
+  const toolName = incidentPayload.tool as string;
+  if (!toolName) {
+    return null;
+  }
+
+  const incidentSeq = incidentEvent.seq;
   const incidentKey = `${runId}_${incidentSeq}`;
 
   // Check cache in Briefing table
@@ -93,36 +160,24 @@ export async function briefIncident(runId: string): Promise<Briefing> {
     return cached.content as unknown as Briefing;
   }
 
-  // Extract structured facts for briefing accuracy (Requirement 2)
-  const incidentPayload = (incidentEvent?.payload || {}) as Record<string, any>;
-  const proposedEvent = [...events].reverse().find((e) => e.type === "action_proposed");
-  const proposedPayload = (proposedEvent?.payload || {}) as Record<string, any>;
+  // Build facts ONLY from that event payload: tool, target, amount, currency, ruleId, ruleReason
+  const args = (incidentPayload.args || {}) as Record<string, any>;
+  const targetId = (incidentPayload.target || args?.capture_id || args?.id || "") as string;
+  const ruleId = (incidentPayload.ruleId || (incidentEvent.type === "action_held" ? "P2" : "P7")) as string;
+  const ruleReason = (incidentPayload.reason || `Action blocked by Rule ${ruleId}.`) as string;
 
-  const ruleId = incidentPayload.ruleId || (incidentEvent?.type === "action_held" ? "P2" : "P7");
-  const toolName = incidentPayload.tool || proposedPayload.tool || "create_refund";
-  const args = incidentPayload.args || proposedPayload.args || {};
-  const requestedAmountValue = args?.amount?.value || (typeof args?.amount === "string" ? args.amount : "45.00");
-  const requestedCurrency = args?.amount?.currency_code || args?.currency || "USD";
-  const targetId = incidentPayload.target || args?.capture_id || args?.id || "unknown";
+  const rawAmount = args?.amount?.value ?? (typeof args?.amount === "string" ? args.amount : typeof args?.amount === "number" ? String(args.amount) : "0.00");
+  const requestedAmountValue = String(rawAmount);
+  const requestedCurrency = String(args?.amount?.currency_code || args?.currency || "USD");
 
   // Look up declared scope IDs
   let declaredScopeList: string[] = (run as any)?.scopeIds || [];
   if (declaredScopeList.length === 0) {
-    if ((run.permissionState as any)?.scopeIds && Array.isArray((run.permissionState as any).scopeIds)) {
-      declaredScopeList = (run.permissionState as any).scopeIds;
-    } else {
-      const startEv = events.find((e) => e.type === "run_started");
-      if (startEv?.payload && Array.isArray((startEv.payload as any).scopeIds)) {
-        declaredScopeList = (startEv.payload as any).scopeIds;
-      }
+    const startEv = events.find((e) => e.type === "run_started");
+    if (startEv?.payload && Array.isArray((startEv.payload as any).scopeIds)) {
+      declaredScopeList = (startEv.payload as any).scopeIds;
     }
   }
-
-  const ruleReason =
-    incidentPayload.reason ||
-    (ruleId === "P7"
-      ? `Target ID '${targetId}' is not in declared scope list [${declaredScopeList.join(", ")}].`
-      : `Action blocked by Rule ${ruleId}.`);
 
   let ruleConfig: any = DEFAULT_MONEY_RULE_CONFIG;
   try {
@@ -203,9 +258,38 @@ ${whyFlaggedInstruction}
 
   // Filter cites to ensure they only contain real event IDs
   const validEventIds = new Set(events.map((e) => e.id));
-  briefing.cites = briefing.cites.filter((id) => validEventIds.has(id));
+  briefing.cites = (briefing.cites || []).filter((id) => validEventIds.has(id));
   if (briefing.cites.length === 0 && incidentEvent) {
     briefing.cites = [incidentEvent.id];
+  }
+
+  // Requirement 2: Deterministic validation check
+  const isValid = validateBriefingDeterministically(briefing, {
+    tool: toolName,
+    target: targetId,
+    amount: requestedAmountValue,
+    ruleId,
+    scopeList: declaredScopeList,
+  });
+
+  if (!isValid) {
+    briefing = {
+      runId,
+      whatHappened: `Agent attempted ${toolName} on target ${targetId} for ${requestedAmountValue} ${requestedCurrency}.`,
+      whyFlagged: ruleId === "P7"
+        ? `Rule P7 fired: Target ID '${targetId}' is not in declared scope list [${declaredScopeList.join(", ")}].`
+        : `Rule ${ruleId} fired: ${ruleReason}`,
+      whatWasRestricted: `${restrictionApplied}.`,
+      humanOptions: [
+        "Approve held action",
+        "Deny and terminate run",
+        "Modify scope and retry",
+      ],
+      cites: briefing.cites.length > 0 ? briefing.cites : [incidentEvent.id],
+      author: "template",
+    };
+  } else {
+    briefing.author = "NVIDIA Nemotron Ultra";
   }
 
   // Cache in DB
@@ -221,6 +305,7 @@ ${whyFlaggedInstruction}
     incidentKey,
     wordCount: countWords(briefing),
     citesCount: briefing.cites.length,
+    author: briefing.author,
   });
 
   return briefing;
