@@ -18,8 +18,8 @@ CRITICAL INSTRUCTIONS:
 1. WORD COUNT LIMIT: The total response MUST BE UNDER 120 WORDS.
 2. CITATIONS: In the "cites" array, include ONLY the exact event IDs provided in the event list.
 3. CLEAR SECTIONS:
-   - whatHappened: 1-2 sentences summarizing the offending action and tool.
-   - whyFlagged: 1 sentence explaining why this contradicted policy or task scope based strictly on the provided facts.
+   - whatHappened: 1-2 sentences summarizing the offending action, tool, target ID, and requested amount.
+   - whyFlagged: 1 sentence explaining why this was flagged. Mention policy caps ONLY if Rule P2 or P4 fired. For Rule P7, state that the target ID is not in the declared scope list and include the scope list; use the real rule reason text and DO NOT mention any dollar caps.
    - whatWasRestricted: What permissions were revoked, tools disabled or moved to require_approval, or if the run was frozen.
    - humanOptions: 1 to 3 concrete options available to the human approver (e.g. "Approve held action", "Deny and terminate run").
 
@@ -72,13 +72,14 @@ export async function briefIncident(runId: string): Promise<Briefing> {
     orderBy: { seq: "asc" },
   });
 
-  const incidentEvent = [...events].reverse().find(
-    (e) =>
-      e.type === "action_held" ||
-      e.type === "run_frozen" ||
-      e.type === "action_blocked" ||
-      e.type === "restriction_applied"
-  );
+  const incidentEvent =
+    [...events].reverse().find(
+      (e) =>
+        e.type === "action_blocked" ||
+        e.type === "action_held" ||
+        e.type === "run_frozen"
+    ) ||
+    [...events].reverse().find((e) => e.type === "restriction_applied");
 
   const incidentSeq = incidentEvent ? incidentEvent.seq : events.length;
   const incidentKey = `${runId}_${incidentSeq}`;
@@ -98,18 +99,30 @@ export async function briefIncident(runId: string): Promise<Briefing> {
   const proposedPayload = (proposedEvent?.payload || {}) as Record<string, any>;
 
   const ruleId = incidentPayload.ruleId || (incidentEvent?.type === "action_held" ? "P2" : "P7");
-  const ruleReason = incidentPayload.reason || "Action blocked by security policy.";
   const toolName = incidentPayload.tool || proposedPayload.tool || "create_refund";
   const args = incidentPayload.args || proposedPayload.args || {};
   const requestedAmountValue = args?.amount?.value || (typeof args?.amount === "string" ? args.amount : "45.00");
   const requestedCurrency = args?.amount?.currency_code || args?.currency || "USD";
   const targetId = incidentPayload.target || args?.capture_id || args?.id || "unknown";
 
-  const runScopeIds: string[] = (run as any)?.scopeIds || [];
-  const permScopeIds = (run.permissionState as any)?.scopeIds || [];
-  const startEv = events.find((e) => e.type === "run_started");
-  const startScopeIds = (startEv?.payload as any)?.scopeIds || [];
-  const declaredScopeList = runScopeIds.length > 0 ? runScopeIds : permScopeIds.length > 0 ? permScopeIds : startScopeIds;
+  // Look up declared scope IDs
+  let declaredScopeList: string[] = (run as any)?.scopeIds || [];
+  if (declaredScopeList.length === 0) {
+    if ((run.permissionState as any)?.scopeIds && Array.isArray((run.permissionState as any).scopeIds)) {
+      declaredScopeList = (run.permissionState as any).scopeIds;
+    } else {
+      const startEv = events.find((e) => e.type === "run_started");
+      if (startEv?.payload && Array.isArray((startEv.payload as any).scopeIds)) {
+        declaredScopeList = (startEv.payload as any).scopeIds;
+      }
+    }
+  }
+
+  const ruleReason =
+    incidentPayload.reason ||
+    (ruleId === "P7"
+      ? `Target ID '${targetId}' is not in declared scope list [${declaredScopeList.join(", ")}].`
+      : `Action blocked by Rule ${ruleId}.`);
 
   let ruleConfig: any = DEFAULT_MONEY_RULE_CONFIG;
   try {
@@ -125,6 +138,23 @@ export async function briefIncident(runId: string): Promise<Briefing> {
     ? `${restrictionPayload.kind} on tool '${restrictionPayload.tool || toolName}' (version ${restrictionPayload.version || 2})`
     : "require_approval on tool 'create_refund'";
 
+  const isCapRule = ruleId === "P2" || ruleId === "P4";
+  const policyCapFact = isCapRule
+    ? (ruleId === "P2"
+        ? `- Configured Policy Per-Call Cap: $${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD`
+        : `- Configured Policy Daily Budget: $${Number(ruleConfig.dailyBudgetUsd).toFixed(2)} USD`)
+    : `- Policy Caps: NOT APPLICABLE (Do not mention policy caps or dollar limits for Rule ${ruleId})`;
+
+  let whyFlaggedInstruction: string;
+  if (ruleId === "P7") {
+    whyFlaggedInstruction = `2. In whyFlagged: State that Rule P7 fired because target ID '${targetId}' is not in the declared scope list [${declaredScopeList.join(", ")}]. Use the exact rule reason text: "${ruleReason}". DO NOT mention any dollar policy limits, caps, or budgets.`;
+  } else if (isCapRule) {
+    const capDesc = ruleId === "P2" ? `$${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD per-call cap` : `$${Number(ruleConfig.dailyBudgetUsd).toFixed(2)} USD daily budget`;
+    whyFlaggedInstruction = `2. In whyFlagged: State that Rule ${ruleId} fired because ${ruleReason}. Mention the configured policy cap (${capDesc}). Do not cite any other policy cap or amount.`;
+  } else {
+    whyFlaggedInstruction = `2. In whyFlagged: State that Rule ${ruleId} fired because ${ruleReason}. Do not cite dollar caps or budgets.`;
+  }
+
   const userPrompt = `INCIDENT STRUCTURED FACTS:
 - Rule ID That Fired: ${ruleId}
 - Rule Reason Text: ${ruleReason}
@@ -132,9 +162,7 @@ export async function briefIncident(runId: string): Promise<Briefing> {
 - Requested Amount & Currency: ${requestedAmountValue} ${requestedCurrency}
 - Target ID: ${targetId}
 - Declared Scope List: [${declaredScopeList.join(", ")}]
-- Configured Policy Per-Call Cap: $${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD
-- Configured Policy Daily Budget: $${Number(ruleConfig.dailyBudgetUsd).toFixed(2)} USD
-- Configured Allowed Currencies: [${ruleConfig.allowedCurrencies.join(", ")}]
+${policyCapFact}
 - Tool Restriction Applied: ${restrictionApplied}
 - Run Status: ${run.status}
 
@@ -144,7 +172,7 @@ ${events.slice(-10).map((e) => `Event ID: ${e.id} (${e.type})`).join("\n")}
 STRICT INSTRUCTIONS:
 State ONLY the structured facts provided above. Do not invent any numbers, caps, or rules.
 1. In whatHappened: State exactly what action was attempted (${toolName}), the target ID (${targetId}), and the requested amount (${requestedAmountValue} ${requestedCurrency}).
-2. In whyFlagged: State that Rule ${ruleId} fired because ${ruleReason}. The policy per-call cap is $${Number(ruleConfig.perCallCapUsd).toFixed(2)} USD. Do not cite any other policy cap or amount.
+${whyFlaggedInstruction}
 3. In whatWasRestricted: State that ${restrictionApplied}.
 4. In humanOptions: Provide 2-3 concrete options (e.g. "Approve held action", "Deny and terminate run").
 5. Total word count MUST be under 120 words. Output JSON only.`;

@@ -720,7 +720,6 @@ export default function SimulatorPage() {
                 )}
                 <div className="pt-2 flex items-center justify-between text-[11px] font-mono text-zinc-500 border-t border-rose-950/40">
                   <span>Author: NVIDIA Nemotron Ultra</span>
-                  <span>Length: &lt; 120 words</span>
                 </div>
               </div>
             )}

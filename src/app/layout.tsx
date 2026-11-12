@@ -68,12 +68,6 @@ export default function RootLayout({
                 Approvals
               </Link>
               <Link
-                href="/playground"
-                className="font-medium text-zinc-400 hover:text-white transition-colors"
-              >
-                Playground
-              </Link>
-              <Link
                 href="/audit"
                 className="font-medium text-zinc-400 hover:text-white transition-colors"
               >

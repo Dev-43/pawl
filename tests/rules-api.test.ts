@@ -51,5 +51,21 @@ describe("Rule Config Storage and Approver Edits API (Task 2.4)", () => {
     const body = await res.json();
     expect(body.perCallCapUsd).toBe(75.0);
     expect(body.dailyBudgetUsd).toBe(250.0);
+
+    // Restore original defaults so test does not mutate shared database state
+    const restoreReq = new NextRequest("http://localhost:3000/api/rules", {
+      method: "PUT",
+      headers: {
+        cookie: `${APPROVER_COOKIE_NAME}=${validToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        perCallCapUsd: 50.0,
+        dailyBudgetUsd: 200.0,
+        allowedCurrencies: ["USD"],
+      }),
+    });
+    const restoreRes = await PUT(restoreReq);
+    expect(restoreRes.status).toBe(200);
   }, 15000);
 });

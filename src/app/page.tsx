@@ -74,10 +74,10 @@ export default function HomePage() {
             Live Simulator
           </Link>
           <Link
-            href="/compare"
+            href="/audit"
             className="px-4 py-2.5 rounded-lg bg-[#0c0d14] hover:bg-[#151722] text-zinc-200 font-semibold text-xs border border-[#23242c] hover:border-[#353745] transition-colors"
           >
-            Side-by-Side Compare
+            Audit Chain
           </Link>
           <Link
             href="/approvals"
